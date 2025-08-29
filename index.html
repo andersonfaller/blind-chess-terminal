@@ -294,11 +294,10 @@
                         
                         const flippedBoardRows = boardRows.reverse().map(row => {
                             const parts = row.split('|');
-                            const rank = parts[0].trim();
+                            // **FIX:** Use the rank directly from the original string, don't recalculate it.
+                            const rank = parts[0].trim(); 
                             const pieces = parts[1].trim().split(/\s+/).reverse().join('  ');
-                            const newRank = 9 - parseInt(rank, 10);
-                            // **FIX:** Corrected the spacing to match the original board's format.
-                            return ` ${newRank} | ${pieces} |`;
+                            return ` ${rank} | ${pieces} |`;
                         });
 
                         const fileLabels = lines[10].trim().split(/\s+/).reverse().join('  ');
