@@ -290,14 +290,23 @@
                     // Flip the board if the player is black
                     if (playerColor === 'black') {
                         const lines = asciiBoard.split('\n');
-                        const boardRows = lines.slice(1, 9);
-                        boardRows.reverse();
+                        const boardRows = lines.slice(1, 9); // Get the 8 board rows
+                        
+                        const flippedBoardRows = boardRows.reverse().map(row => {
+                            const parts = row.split('|');
+                            const rank = parts[0].trim();
+                            const pieces = parts[1].trim().split(/\s+/).reverse().join('  ');
+                            const newRank = 9 - parseInt(rank, 10);
+                            // **FIX:** Corrected the spacing to match the original board's format.
+                            return ` ${newRank} | ${pieces} |`;
+                        });
+
                         const fileLabels = lines[10].trim().split(/\s+/).reverse().join('  ');
                         
                         const flippedLines = [
-                            lines[0],
-                            ...boardRows,
-                            lines[9],
+                            lines[0], // Top border
+                            ...flippedBoardRows,
+                            lines[9], // Bottom border
                             `     ${fileLabels}`
                         ];
                         asciiBoard = flippedLines.join('\n');
