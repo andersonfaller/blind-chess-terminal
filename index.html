@@ -19,7 +19,7 @@
       var s = JSON.parse(localStorage.getItem('bct:settings') || '{}');
       if (s.theme) document.documentElement.dataset.theme = s.theme;
       if (s.crt === false) document.documentElement.classList.remove('crt');
-      if (s.fontSize) document.documentElement.style.setProperty('--font-size', s.fontSize + 'px');
+      if (s.fontSize && (s.v || s.fontSize !== 15)) document.documentElement.style.setProperty('--font-size', s.fontSize + 'px');
     } catch (e) { /* storage unavailable */ }
   </script>
   <script type="module" src="js/main.js"></script>

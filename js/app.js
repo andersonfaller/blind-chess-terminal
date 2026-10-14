@@ -19,7 +19,7 @@ import {
   COLOR_NAMES, stripAccents, levenshtein, capitalize, isSquare, uciToObj, moveToUci, sanToSpeech, pick,
 } from './chess-utils.js';
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.0.1';
 export const THEMES = ['phosphor', 'amber', 'ice', 'dracula', 'solarized', 'paper', 'mono'];
 const STD_FEN = new Chess().fen();
 
@@ -81,7 +81,7 @@ export class App {
       ['guide', t('boot.q.guide')],
       ['help', t('boot.q.help')],
     ];
-    for (const [cmd, desc] of quick) term.print(['  ', { t: cmd, cmd, run: true, c: 'cmd' }, pad(cmd, 9), { t: desc, c: 'dim' }]);
+    term.printList(quick.map(([cmd, desc]) => [{ t: cmd, cmd, run: true, c: 'cmd' }, desc]));
     term.blank();
     term.print([{ t: '💡 ', c: 'accent' }, { t: pick(t('tips').split('|')), c: 'dim' }]);
     if (getLang() === 'en') term.print([{ t: 'Português? ', c: 'dim' }, { t: 'lang pt', cmd: 'lang pt', run: true }], 'dim');
@@ -100,7 +100,9 @@ export class App {
     const root = document.documentElement;
     root.dataset.theme = this.settings.get('theme');
     root.classList.toggle('crt', !!this.settings.get('crt'));
-    root.style.setProperty('--font-size', `${this.settings.get('fontSize')}px`);
+    const fs = this.settings.get('fontSize');
+    if (fs) root.style.setProperty('--font-size', `${fs}px`);
+    else root.style.removeProperty('--font-size');
     root.lang = getLang() === 'pt' ? 'pt-BR' : 'en';
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = getComputedStyle(root).getPropertyValue('--bg').trim() || '#0b0f0b';
@@ -467,7 +469,7 @@ export class App {
     add('lang', ['language', 'idioma', 'lingua'], 'settings', 'lang [en|pt]', (a) => this.cmdLang(a), () => ['en', 'pt']);
     add('theme', ['tema', 'color', 'cores-tema'], 'settings', `theme [${THEMES.join('|')}]`, (a) => this.cmdTheme(a), () => THEMES);
     add('crt', ['scanlines'], 'settings', 'crt [on|off]', (a) => this.cmdToggle('crt', a, 'set.crt'), onoff);
-    add('font', ['fonte', 'zoom', 'size'], 'settings', 'font [12-24|+|-]', (a) => this.cmdFont(a), () => ['+', '-', '14', '16', '18', '20']);
+    add('font', ['fonte', 'zoom', 'size'], 'settings', 'font [12-24|+|-|auto]', (a) => this.cmdFont(a), () => ['auto', '+', '-', '14', '16', '18', '20']);
     add('clock', ['relogio', 'timecontrol', 'tc'], 'settings', 'clock [5+3|10|off]', (a) => this.cmdClock(a), () => ['off', '1+0', '3+2', '5+3', '10+5', '15+10', '30+0']);
     add('announce', ['anunciar', 'anuncio'], 'settings', 'announce [san|full]', (a) => this.cmdAnnounce(a), () => ['san', 'full']);
     add('boardstyle', ['estilo'], 'settings', 'boardstyle [unicode|ascii]', (a) => this.cmdBoardStyle(a), () => ['unicode', 'ascii']);
@@ -640,10 +642,13 @@ export class App {
     const notation = this.settings.get('notation');
     const lang = getLang();
     const pieces = listPieces(chess);
-    for (const c of ['w', 'b']) {
+    this.term.printList(['w', 'b'].map((c) => {
       const { officers, pawns } = piecesToText(pieces[c], notation);
-      this.term.print([{ t: capitalize(COLOR_NAMES[lang][c]).padEnd(9), c: 'hl' }, officers.join(' '), pawns.length ? { t: `  ·  ${t('puzzle.pawns')}: ${pawns.join(' ')}`, c: 'dim' } : '']);
-    }
+      return [
+        { t: capitalize(COLOR_NAMES[lang][c]), c: 'hl' },
+        [{ t: officers.join(' '), c: 'fg' }, pawns.length ? { t: `  ·  ${t('puzzle.pawns')}: ${pawns.join(' ')}` } : ''],
+      ];
+    }), { cls: 'pieces-list' });
   }
 
   cmdPieces() {
@@ -760,22 +765,20 @@ export class App {
     ];
     this.setMode(new MenuMode(this, items.map(([cmd]) => cmd)));
     this.term.print([{ t: '☰ ', c: 'accent' }, { t: t('menu.title'), c: 'hl' }]);
-    items.forEach(([cmd, key], i) => {
+    this.term.printList(items.map(([cmd, key], i) => {
       const best = cmd.startsWith('drill ') ? this.stats.drillBest(cmd.slice(6)) : null;
-      this.term.print([
-        { t: ` ${i + 1}. `, c: 'num' },
-        { t: t(`${key}.title`), cmd, run: true, c: 'cmd' },
-        { t: '  ' + t(`${key}.desc`), c: 'dim' },
-        best ? { t: `  🏅 ${best.correct}/${best.total}`, c: 'accent' } : null,
-      ]);
-    });
+      return [
+        [{ t: `${i + 1}. `, c: 'num' }, { t: t(`${key}.title`), cmd, run: true, c: 'cmd' }],
+        [t(`${key}.desc`), best ? { t: `  🏅 ${best.correct}/${best.total}`, c: 'accent' } : null],
+      ];
+    }));
   }
 
   cmdDrill(args) {
     const kindArg = args.find((a) => DRILL_ALIASES[stripAccents(a)]);
     if (!kindArg) {
       this.term.print(t('drill.usage'), 'warn');
-      for (const k of DRILL_KINDS) this.term.print(['  ', { t: `drill ${k}`, cmd: `drill ${k}`, run: true, c: 'cmd' }, { t: '  ' + t(`drill.${k}.title`), c: 'dim' }]);
+      this.term.printList(DRILL_KINDS.map((k) => [{ t: `drill ${k}`, cmd: `drill ${k}`, run: true, c: 'cmd' }, t(`drill.${k}.title`)]));
       return;
     }
     const kind = DRILL_ALIASES[stripAccents(kindArg)];
@@ -1020,7 +1023,7 @@ export class App {
     if (!args.length) {
       const cur = this.settings.get('blind');
       this.term.print(t('blind.current', { mode: t(`blind.mode.${cur}`) }), 'hl');
-      for (const k of ['off', 'on', 'strict']) this.term.print(['  ', { t: `blind ${k}`, cmd: `blind ${k}`, run: true, c: 'cmd' }, pad(`blind ${k}`, 14), { t: t(`blind.desc.${k}`), c: 'dim' }]);
+      this.term.printList(['off', 'on', 'strict'].map((k) => [{ t: `blind ${k}`, cmd: `blind ${k}`, run: true, c: 'cmd' }, t(`blind.desc.${k}`)]));
       return;
     }
     const v = map[stripAccents(args[0])];
@@ -1165,8 +1168,12 @@ export class App {
   }
 
   cmdFont(args) {
-    let size = this.settings.get('fontSize');
     const a = args[0];
+    if (a === 'auto') {
+      this.settings.set('fontSize', null);
+      return this.term.print(t('font.auto'), 'ok');
+    }
+    let size = this.settings.get('fontSize') || Math.round(parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size'))) || 15;
     if (a === '+') size++;
     else if (a === '-') size--;
     else if (/^\d+$/.test(a || '')) size = +a;
@@ -1230,7 +1237,7 @@ export class App {
       ['announce', s.get('announce'), 'announce full'],
       ['theme', s.get('theme'), 'theme'],
       ['crt', s.get('crt') ? 'on' : 'off', 'crt'],
-      ['font', `${s.get('fontSize')}px`, 'font +'],
+      ['font', s.get('fontSize') ? `${s.get('fontSize')}px` : 'auto', 'font +'],
       ['boardstyle', s.get('boardStyle'), 'boardstyle ascii'],
     ];
     this.term.printNode(ui.table([t('settings.h.setting'), t('settings.h.value'), t('settings.h.change')], rows.map(([k, v, cmd]) => [k, { t: v, c: 'accent' }, linkCell({ t: cmd, cmd, run: false })])));
@@ -1288,15 +1295,13 @@ export class App {
     const got = this.stats.data.achievements;
     const n = Object.keys(got).length;
     this.term.print([{ t: '🏆 ', c: 'accent' }, { t: t('ach.title', { n, total: ACHIEVEMENTS.length }), c: 'hl' }]);
-    for (const a of ACHIEVEMENTS) {
+    this.term.printList(ACHIEVEMENTS.map((a) => {
       const date = got[a.id];
-      this.term.print([
-        { t: date ? `  ${a.icon} ` : '  · ', c: date ? 'ok' : 'dim' },
-        { t: t(`ach.${a.id}.title`), c: date ? 'hl' : 'dim' },
-        { t: `  ${t(`ach.${a.id}.desc`)}`, c: 'dim' },
-        date ? { t: `  ${date}`, c: 'dim' } : '',
-      ]);
-    }
+      return [
+        [{ t: date ? `${a.icon} ` : '·  ', c: date ? 'ok' : 'dim' }, { t: t(`ach.${a.id}.title`), c: date ? 'hl' : 'dim' }],
+        [t(`ach.${a.id}.desc`), date ? `  · ${date}` : ''],
+      ];
+    }));
   }
 
   cmdAbout() {
@@ -1334,9 +1339,10 @@ export class App {
     const groups = ['play', 'aids', 'train', 'position', 'settings', 'info'];
     for (const g of groups) {
       term.print(t(`help.group.${g}`), 'help-group');
-      for (const c of this.commands.filter((x) => x.group === g)) {
-        term.print(['  ', { t: c.name, cmd: c.name === 'play' || c.usage === c.name ? c.name : `help ${c.name}`, run: true, c: 'cmd' }, pad(c.name, 14), { t: t(`cmd.${c.name}`), c: 'dim' }]);
-      }
+      term.printList(this.commands.filter((x) => x.group === g).map((c) => [
+        { t: c.name, cmd: c.name === 'play' || c.usage === c.name ? c.name : `help ${c.name}`, run: true, c: 'cmd' },
+        t(`cmd.${c.name}`),
+      ]), { cls: 'help-list' });
     }
     term.print(t('help.moves'), 'hl');
     term.print(t('help.keys'), 'dim');
@@ -1365,8 +1371,6 @@ class MenuMode {
   actions() { return this.cmds.map((c, i) => ({ label: `${i + 1}`, cmd: String(i + 1), title: c })).concat([{ label: 'stop', cmd: 'stop' }]); }
   stop() {}
 }
-
-const pad = (s, width) => ' '.repeat(Math.max(1, width - s.length));
 
 function shortEngine(id) {
   return { local: 'Stockfish', online: 'stockfish.online', chessapi: 'chess-api', basic: 'JS engine', auto: 'auto' }[id] || id;

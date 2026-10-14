@@ -41,7 +41,7 @@ export const DEFAULT_SETTINGS = {
   lang: null, // null = follow the browser
   theme: 'phosphor',
   crt: true,
-  fontSize: 15,
+  fontSize: null, // null = automatic (smaller on phones)
   notation: 'en',
   speak: true,
   voiceName: null,
@@ -59,7 +59,10 @@ export const DEFAULT_SETTINGS = {
 
 export class Settings {
   constructor() {
-    this.values = { ...DEFAULT_SETTINGS, ...load('settings', {}) };
+    const saved = load('settings', {});
+    // v1 stored the old default font size (15) for everybody: make it automatic.
+    if (!saved.v && saved.fontSize === 15) saved.fontSize = null;
+    this.values = { ...DEFAULT_SETTINGS, ...saved, v: 2 };
     if (!this.values.lang) this.values.lang = detectLang();
     this.listeners = new Set();
   }
@@ -80,7 +83,7 @@ export class Settings {
 
   reset() {
     const lang = this.values.lang;
-    this.values = { ...DEFAULT_SETTINGS, lang };
+    this.values = { ...DEFAULT_SETTINGS, lang, v: 2 };
     save('settings', this.values);
     for (const fn of this.listeners) fn('*', null);
   }
