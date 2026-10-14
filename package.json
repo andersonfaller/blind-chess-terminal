@@ -1,0 +1,13 @@
+{
+  "name": "blind-chess-terminal",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Blindfold chess trainer in the browser: terminal UI, local Stockfish (WASM), drills, puzzles, voice.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node --test tests/*.test.mjs",
+    "puzzles": "node tools/gen-puzzles.mjs"
+  },
+  "license": "MIT"
+}
