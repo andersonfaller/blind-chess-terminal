@@ -189,6 +189,26 @@ export class Terminal {
     for (const l of lines) this.print(l, cls);
   }
 
+  /**
+   * A "key  description" list. Laid out as a real grid (not padded text), so
+   * long descriptions wrap under their own column, or stack on small screens.
+   * rows: [[keyContent, descContent], ...] with the same content forms as print().
+   */
+  printList(rows, { cls = '' } = {}) {
+    const box = document.createElement('div');
+    box.className = 'items' + (cls ? ' ' + cls : '');
+    for (const [key, desc] of rows) {
+      const k = document.createElement('div');
+      k.className = 'item-key';
+      fill(k, key);
+      const d = document.createElement('div');
+      d.className = 'item-desc';
+      fill(d, desc);
+      box.append(k, d);
+    }
+    return this._append(box);
+  }
+
   printNode(node, { forceScroll = false } = {}) {
     return this._append(node, { forceScroll });
   }
@@ -287,8 +307,11 @@ function fill(el, content) {
     return;
   }
   if (!Array.isArray(content)) {
-    el.textContent = String(content);
-    return;
+    if (typeof content !== 'object') {
+      el.textContent = String(content);
+      return;
+    }
+    content = [content]; // a single { t, c, cmd } part
   }
   for (const part of content) {
     if (part == null || part === false) continue;

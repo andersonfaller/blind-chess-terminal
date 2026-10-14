@@ -290,8 +290,28 @@ body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   min-height: 1.5em;
+  /* Hanging indent: wrapped continuation lines are indented, so one long
+     message never looks like two unrelated lines on narrow screens. */
+  padding-left: 2ch;
+  text-indent: -2ch;
   animation: line-in 0.14s ease-out;
 }
+.line * { text-indent: 0; }
+
+/* "key  description" lists (help, menus, achievements...): a real grid, so
+   descriptions wrap inside their own column. */
+.items {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 2.5ch;
+  padding-left: 2ch;
+  margin: 2px 0 6px;
+  animation: line-in 0.14s ease-out;
+}
+.item-key { white-space: nowrap; }
+.item-desc { color: var(--dim); overflow-wrap: anywhere; }
+.pieces-list .item-desc { color: var(--hl); }
+.help-list { grid-template-columns: 13ch minmax(0, 1fr); } /* same column in every group */
 
 @keyframes line-in {
   from { opacity: 0; transform: translateY(2px); }
@@ -311,7 +331,7 @@ body {
 .you { color: var(--you); font-weight: 600; }
 .opp { color: var(--opp); font-weight: 700; }
 .mono-line { color: var(--hl); user-select: all; }
-.moves-line { color: var(--hl); padding-left: 1ch; border-left: 2px solid var(--border); margin: 2px 0; }
+.moves-line { color: var(--hl); padding-left: 1ch; text-indent: 0; border-left: 2px solid var(--border); margin: 2px 0; }
 .help-group { color: var(--accent); margin-top: 0.6em; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.85em; }
 .ok-line, .err-line { }
 
@@ -551,22 +571,51 @@ pre.pgn {
 /* --- small screens ---------------------------------------------------------------------- */
 
 @media (max-width: 700px) {
-  #app { padding: 0; }
+  :root { --font-size: 14px; } /* "font <n>" overrides this */
+  /* viewport-fit=cover: keep clear of the notch, status bar and home indicator. */
+  #app {
+    padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) 0 env(safe-area-inset-left, 0);
+  }
   .window { border-radius: 0; border: 0; }
   .titlebar { height: 30px; }
   .dots { display: none; }
   #output { padding: 10px 12px 6px; }
-  .prompt { padding: 8px 10px 10px 12px; }
-  .actions { padding: 6px 10px 0; }
-  .statusbar { padding: 4px 10px; }
+  .prompt { padding: 8px 10px max(10px, env(safe-area-inset-bottom, 0)) 12px; }
   .card { padding: 8px 10px; }
-  .card-row { grid-template-columns: minmax(84px, max-content) 1fr; gap: 0 10px; }
+  .card-row { grid-template-columns: minmax(84px, max-content) minmax(0, 1fr); gap: 0 10px; }
   .board-side { min-width: 0; }
+  .tbl td, .tbl th { padding-right: 12px; }
+
+  /* Status line: all segments flow together and wrap instead of running off
+     the screen; the engine/voice indicators stay right-aligned. */
+  .statusbar { display: flex; flex-wrap: wrap; row-gap: 2px; column-gap: 0; padding: 4px 10px; overflow: visible; }
+  .status-left, .status-right { display: contents; }
+  .statusbar .seg { padding: 0 8px; }
+  .status-left .seg:last-child { border-right: 0; }
+  .status-right .seg:first-child { margin-left: auto; border-left: 1px solid var(--border); }
+  .status-left .seg:first-child { padding-left: 0; }
+
+  /* Quick actions scroll sideways; fade the edge so it is obvious. */
+  .actions {
+    padding: 6px 10px 0;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
+  .actions::after { content: ''; flex: 0 0 24px; }
+}
+
+/* Phones: each list entry becomes "command" with its description below. */
+@media (max-width: 560px) {
+  .items, .help-list { grid-template-columns: minmax(0, 1fr); padding-left: 1ch; }
+  .item-key { white-space: normal; }
+  .item-desc { padding-left: 2ch; margin-bottom: 5px; }
 }
 
 @media (pointer: coarse) {
   .icon-btn.send { display: grid; }
   .chip { padding: 5px 14px; }
+  /* iOS zooms the whole page when an input's text is under 16px. */
+  #input { font-size: max(16px, var(--font-size)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
