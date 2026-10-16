@@ -159,33 +159,75 @@ export function normalizeSpoken(transcript) {
   return { compact: out.join(''), spaced: out.join(' ') };
 }
 
+/** Facts about the browser that decide how voice input can work. */
+export function platformInfo() {
+  if (typeof navigator === 'undefined') return { iOS: false, standalone: false, secure: true };
+  const ua = navigator.userAgent || '';
+  // iPadOS reports itself as a Mac; touch support gives it away.
+  const iOS = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  let standalone = navigator.standalone === true;
+  try { standalone = standalone || window.matchMedia('(display-mode: standalone)').matches; } catch { /* ignore */ }
+  return { iOS, standalone, secure: typeof window === 'undefined' || !!window.isSecureContext };
+}
+
+// Errors that end voice input; the rest ("aborted", "no-speech") are routine.
+const FATAL = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'language-not-supported', 'bad-grammar']);
+
 export class Listener {
-  constructor(settings, { onResult, onState }) {
+  /**
+   * onResult(alternatives)  a final transcript (array of alternatives)
+   * onState(listening)      listening started/stopped
+   * onError({ code, message, restart })  restart=true when only an automatic
+   *                         restart was refused (it worked before), not a denial
+   */
+  constructor(settings, { onResult, onState, onError = () => {} }) {
     this.settings = settings;
     this.onResult = onResult;
     this.onState = onState;
+    this.onError = onError;
     const Rec = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
     this.Rec = Rec || null;
+    this.platform = platformInfo();
     this.rec = null;
-    this.active = false;
+    this.active = false; // the user wants to listen
   }
 
   get supported() {
     return !!this.Rec;
   }
 
-  start() {
-    if (!this.supported || this.active) return false;
-    this.active = true;
-    this._spawn();
-    this.onState(true);
-    return true;
+  /**
+   * iOS/iPadOS only start recognition from a tap and don't keep listening
+   * reliably, so there every tap captures one utterance ("tap to talk").
+   */
+  get tapToTalk() {
+    return this.platform.iOS;
   }
 
-  _spawn() {
-    const rec = new this.Rec();
-    rec.lang = LANG_TAGS[this.settings.get('lang')] || 'en-US';
-    rec.continuous = true;
+  get lang() {
+    return LANG_TAGS[this.settings.get('lang')] || 'en-US';
+  }
+
+  /** Must be called from a user gesture (click / Enter) for iOS to allow it. */
+  start() {
+    if (!this.supported || this.rec) return false;
+    this.active = true;
+    this._spawn(true);
+    return this.active;
+  }
+
+  _spawn(fromGesture) {
+    let rec;
+    try {
+      rec = new this.Rec();
+    } catch (err) {
+      this.active = false;
+      this.onError({ code: 'start-failed', message: (err && err.message) || String(err), restart: !fromGesture });
+      this.onState(false);
+      return;
+    }
+    rec.lang = this.lang;
+    rec.continuous = !this.tapToTalk;
     rec.interimResults = false;
     rec.maxAlternatives = 3;
     rec.onresult = (e) => {
@@ -197,26 +239,47 @@ export class Listener {
       }
     };
     rec.onerror = (e) => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        this.stop();
-        this.onState(false, e.error);
+      const code = (e && e.error) || 'unknown';
+      if (code === 'aborted') return;
+      if (code === 'no-speech') {
+        if (this.tapToTalk) this.onError({ code, message: e.message || '', restart: false });
+        return;
+      }
+      if (FATAL.has(code) || code === 'unknown') {
+        this.active = false;
+        this.onError({ code, message: (e && e.message) || '', restart: !fromGesture });
       }
     };
     rec.onend = () => {
-      // Browsers stop recognition after silence; keep listening while enabled.
-      if (this.active) {
-        try { rec.start(); } catch { setTimeout(() => this.active && this._spawn(), 300); }
+      if (this.rec !== rec) return; // replaced or stopped
+      if (this.active && !this.tapToTalk) {
+        // Desktop browsers stop after a silence: keep listening.
+        this.rec = null;
+        setTimeout(() => { if (this.active && !this.rec) this._spawn(false); }, 250);
+        return;
       }
+      this.rec = null;
+      this.active = false;
+      this.onState(false);
     };
     this.rec = rec;
-    try { rec.start(); } catch { /* already started */ }
+    try {
+      rec.start();
+      if (fromGesture) this.onState(true);
+    } catch (err) {
+      this.rec = null;
+      this.active = false;
+      this.onError({ code: 'start-failed', message: (err && err.message) || String(err), restart: !fromGesture });
+      this.onState(false);
+    }
   }
 
   stop() {
     this.active = false;
-    if (this.rec) {
-      try { this.rec.stop(); } catch { /* ignore */ }
-      this.rec = null;
+    const rec = this.rec;
+    this.rec = null;
+    if (rec) {
+      try { rec.abort ? rec.abort() : rec.stop(); } catch { /* ignore */ }
     }
     this.onState(false);
   }

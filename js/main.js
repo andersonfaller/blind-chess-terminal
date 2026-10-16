@@ -14,10 +14,10 @@ term.forceFocus();
 const mic = document.getElementById('mic-btn');
 if (app.listener.supported) {
   mic.hidden = false;
+  // Starting recognition inside the click handler matters: iOS only allows it from a tap.
   mic.addEventListener('click', () => {
     term.echo('listen');
     app.execute('listen');
-    mic.classList.toggle('on', app.listener.active);
   });
 }
 
