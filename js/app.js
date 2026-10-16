@@ -1,7 +1,7 @@
 // Application core: command registry, activity (mode) switching, status line,
 // voice input, achievements and all the "glue" between modules.
 import { Chess, validateFen } from '../vendor/chess.js/chess.js';
-import { t, setLang, getLang } from './i18n.js';
+import { t, setLang, getLang, hasKey } from './i18n.js';
 import { load, save, remove } from './storage.js';
 import { Speaker, Listener, normalizeSpoken } from './speech.js';
 import { Sound } from './sound.js';
@@ -19,7 +19,7 @@ import {
   COLOR_NAMES, stripAccents, levenshtein, capitalize, isSquare, uciToObj, moveToUci, sanToSpeech, pick,
 } from './chess-utils.js';
 
-export const VERSION = '2.0.1';
+export const VERSION = '2.0.2';
 export const THEMES = ['phosphor', 'amber', 'ice', 'dracula', 'solarized', 'paper', 'mono'];
 const STD_FEN = new Chess().fen();
 
@@ -46,7 +46,8 @@ export class App {
     this.engines.setPreference(settings.get('engine'));
     this.listener = new Listener(settings, {
       onResult: (alts) => this.onVoice(alts),
-      onState: (on, err) => this.onListenState(on, err),
+      onState: (on) => this.onListenState(on),
+      onError: (err) => this.onListenError(err),
     });
     this.mode = null;
     this.lastGame = load('lastGame', null);
@@ -280,7 +281,7 @@ export class App {
   rightStatus() {
     const st = this.engines.status();
     const segs = [];
-    if (this.listener.active) segs.push({ t: '🎙', c: 'ok pulse', title: t('status.listening') });
+    if (this.listener.active || this.listener.rec) segs.push({ t: '🎙', c: 'ok pulse', title: t('status.listening') });
     segs.push({ t: this.settings.get('speak') ? '🔊' : '🔇', title: t('status.voice') });
     let label;
     let cls = 'ok';
@@ -405,9 +406,34 @@ export class App {
     this.term.print(t('voice.notUnderstood', { text: alts[0] }), 'warn');
   }
 
-  onListenState(on, err) {
-    if (err) this.term.print(t('listen.denied'), 'err');
+  onListenState(on) {
+    const mic = document.getElementById('mic-btn');
+    if (mic) mic.classList.toggle('on', !!on);
     this.refresh();
+  }
+
+  /** Explain a speech-recognition failure: what failed, how to fix it, raw detail. */
+  onListenError({ code, message, restart }) {
+    const plat = this.listener.platform;
+    if (code === 'no-speech') {
+      this.term.print(t('listen.noSpeech'), 'dim');
+      return;
+    }
+    this.sound.play('error');
+    if (restart && (code === 'not-allowed' || code === 'service-not-allowed')) {
+      // It worked before; only the automatic restart was refused.
+      this.term.print(t('listen.restartRefused'), 'warn');
+      return;
+    }
+    const kind = {
+      'not-allowed': 'mic', 'service-not-allowed': 'service', 'audio-capture': 'audio',
+      network: 'network', 'language-not-supported': 'language',
+    }[code] || 'generic';
+    this.term.print(t(`listen.err.${kind}`, { lang: this.listener.lang, code }), 'err');
+    const fixKey = `listen.fix.${plat.iOS ? 'ios' : 'desktop'}.${kind}`;
+    if (hasKey(fixKey)) for (const line of t(fixKey).split('\n')) this.term.print(line, 'dim');
+    if (plat.iOS && plat.standalone && (kind === 'service' || kind === 'mic')) this.term.print(t('listen.fix.standalone'), 'warn');
+    this.term.print([t('listen.detail', { code, message: message || '—' }), ' ', { t: 'listen info', cmd: 'listen info', run: true }], 'dim');
   }
 
   // -- commands --------------------------------------------------------------------------
@@ -463,7 +489,7 @@ export class App {
     add('blind', ['blindfold', 'cego', 'vendado', 'venda'], 'settings', 'blind [off|on|strict]', (a) => this.cmdBlind(a), () => ['off', 'on', 'strict']);
     add('engine', ['motor', 'engines'], 'settings', 'engine [auto|local|online|chessapi|basic|test]', (a) => this.cmdEngine(a), () => [...ENGINE_IDS, 'test']);
     add('voice', ['speak', 'voz', 'falar', 'tts'], 'settings', 'voice [on|off|list|rate <0.5-2>|<n>|test]', (a) => this.cmdVoice(a), () => ['on', 'off', 'list', 'rate', 'test']);
-    add('listen', ['mic', 'ouvir', 'microfone', 'microphone'], 'settings', 'listen [on|off]', (a) => this.cmdListen(a), onoff);
+    add('listen', ['mic', 'ouvir', 'microfone', 'microphone'], 'settings', 'listen [on|off|info]', (a) => this.cmdListen(a), () => ['on', 'off', 'info']);
     add('sound', ['som', 'sfx', 'beep'], 'settings', 'sound [on|off]', (a) => this.cmdToggle('sound', a, 'set.sound'), onoff);
     add('notation', ['notacao'], 'settings', 'notation [en|pt]', (a) => this.cmdNotation(a), () => ['en', 'pt']);
     add('lang', ['language', 'idioma', 'lingua'], 'settings', 'lang [en|pt]', (a) => this.cmdLang(a), () => ['en', 'pt']);
@@ -1115,17 +1141,51 @@ export class App {
 
   cmdListen(args) {
     const l = this.listener;
-    if (!l.supported) return this.term.print(t('listen.unsupported'), 'err');
+    if (['info', 'diag', 'diagnostico', 'test', 'teste'].includes(args[0])) return this.listenInfo();
+    if (!l.supported) {
+      this.term.print(t('listen.unsupported'), 'err');
+      return this.term.print([t('listen.detail', { code: 'no SpeechRecognition', message: '—' }), ' ', { t: 'listen info', cmd: 'listen info', run: true }], 'dim');
+    }
     const want = args[0] ? (ON.includes(args[0]) ? true : OFF.includes(args[0]) ? false : null) : !l.active;
     if (want === null) return this.term.print(t('listen.usage'), 'warn');
-    if (want) {
-      l.start();
-      this.term.print(t('listen.on'), 'ok');
-      this.term.print(t('listen.examples'), 'dim');
-    } else {
+    if (!want) {
       l.stop();
-      this.term.print(t('listen.off'), 'ok');
+      return this.term.print(t('listen.off'), 'ok');
     }
+    // The engine's voice would be picked up (and iOS can't record while speaking).
+    this.speaker.stop();
+    if (!l.start()) return;
+    if (l.tapToTalk) {
+      this.term.print(t('listen.speakNow'), 'ok');
+      if (!this.listenHintShown) this.term.print(t('listen.tapHint'), 'dim');
+    } else {
+      this.term.print(t('listen.on'), 'ok');
+    }
+    if (!this.listenHintShown) this.term.print(t('listen.examples'), 'dim');
+    this.listenHintShown = true;
+  }
+
+  async listenInfo() {
+    const l = this.listener;
+    const p = l.platform;
+    const yes = t('listen.info.yes');
+    const no = t('listen.info.no');
+    let mic = t('listen.info.unknown');
+    try {
+      if (navigator.permissions && navigator.permissions.query) mic = (await navigator.permissions.query({ name: 'microphone' })).state;
+    } catch { /* not supported by this browser */ }
+    const api = typeof window.SpeechRecognition !== 'undefined' ? 'SpeechRecognition' : typeof window.webkitSpeechRecognition !== 'undefined' ? 'webkitSpeechRecognition' : null;
+    const rows = [
+      [t('listen.info.api'), api ? `${yes} (${api})` : no],
+      [t('listen.info.mode'), l.tapToTalk ? t('listen.info.modeTap') : t('listen.info.modeContinuous')],
+      [t('listen.info.lang'), l.lang],
+      [t('listen.info.micPerm'), mic],
+      [t('listen.info.secure'), p.secure ? yes : no],
+      [t('listen.info.standalone'), p.standalone ? yes : no],
+      [t('listen.info.device'), p.iOS ? 'iOS / iPadOS' : (navigator.platform || '?')],
+    ];
+    this.term.printNode(ui.card(`🎙 ${t('listen.info.title')}`, rows), { forceScroll: true });
+    if (p.iOS) for (const line of t('listen.fix.ios.service').split('\n')) this.term.print(line, 'dim');
   }
 
   cmdToggle(key, args, msgKey) {

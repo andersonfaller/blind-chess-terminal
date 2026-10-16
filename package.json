@@ -1,6 +1,6 @@
 {
   "name": "blind-chess-terminal",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "Blindfold chess trainer in the browser: terminal UI, local Stockfish (WASM), drills, puzzles, voice.",
   "type": "module",
