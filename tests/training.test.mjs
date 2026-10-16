@@ -26,6 +26,11 @@ test('spoken moves are normalised', () => {
   assert.equal(normalizeSpoken('torre para a 1').compact, 'Ra1');
   assert.equal(normalizeSpoken('e 8 promotes to queen').compact, 'e8=Q');
   assert.equal(normalizeSpoken('c 3 e 4 g 5').spaced, 'c3 e4 g5');
+  // Real iPhone transcripts.
+  assert.equal(normalizeSpoken('E quatro').compact, 'e4');
+  assert.equal(normalizeSpoken('Cavalo F3').compact, 'Nf3');
+  assert.equal(normalizeSpoken('é quatro.').compact, 'e4');
+  assert.equal(normalizeSpoken('Peão e4').compact, 'e4');
   // The result is understood by the move parser.
   const c = new Chess();
   assert.equal(parseMove(c, normalizeSpoken('knight f three').compact).move.san, 'Nf3');

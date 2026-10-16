@@ -19,7 +19,7 @@ import {
   COLOR_NAMES, stripAccents, levenshtein, capitalize, isSquare, uciToObj, moveToUci, sanToSpeech, pick,
 } from './chess-utils.js';
 
-export const VERSION = '2.0.2';
+export const VERSION = '2.0.3';
 export const THEMES = ['phosphor', 'amber', 'ice', 'dracula', 'solarized', 'paper', 'mono'];
 const STD_FEN = new Chess().fen();
 
@@ -28,7 +28,9 @@ const BLACK = ['black', 'b', 'pretas', 'preto', 'preta', 'pretos', 'p', 'negras'
 const RANDOM = ['random', 'r', 'aleatorio', 'sorte', 'any', 'qualquer', '?'];
 const ON = ['on', 'yes', 'true', '1', 'sim', 'ligado', 'ligar', 'ativar'];
 const OFF = ['off', 'no', 'false', '0', 'nao', 'desligado', 'desligar', 'desativar'];
-const VOICE_COMMANDS = new Set(['board', 'repeat', 'hint', 'undo', 'moves', 'time', 'pieces', 'next', 'skip', 'solution', 'stop', 'eval', 'resign', 'draw', 'help', 'play', 'train', 'puzzle']);
+const VOICE_COMMANDS = new Set(['board', 'repeat', 'hint', 'undo', 'moves', 'time', 'pieces', 'where', 'legal', 'next', 'skip', 'solution', 'stop', 'eval', 'resign', 'draw', 'help', 'play', 'resume', 'go', 'train', 'puzzle']);
+// Something shaped like a chess move (SAN in English or Portuguese letters, castling, UCI).
+const MOVE_LIKE = /^([KQRBNDTC]?[a-h]?[1-8]?x?[a-h][1-8](=?[QRBNDTCqrbn])?|O-O(-O)?|0-0(-0)?|[a-h][1-8][a-h][1-8][qrbn]?)[+#]?$/;
 
 export class App {
   constructor(term, settings) {
@@ -155,7 +157,7 @@ export class App {
       return;
     }
     // Looks like a chess move without a game?
-    if (/^([KQRBNDTC]?[a-h]?[1-8]?x?[a-h][1-8](=?[QRBNDTCqrbn])?|O-O(-O)?|0-0(-0)?|[a-h][1-8][a-h][1-8][qrbn]?)[+#]?$/.test(trimmed)) {
+    if (MOVE_LIKE.test(trimmed)) {
       this.term.print([t('err.noGame'), ' ', { t: 'play', cmd: 'play', run: true }], 'warn');
       return;
     }
@@ -378,32 +380,78 @@ export class App {
 
   onVoice(alts) {
     const notation = this.settings.get('notation');
-    for (const alt of alts) {
+    const local = (san) => sanToLocal(san, notation);
+    const m = this.mode;
+    const board = m && (m.name === 'game' || m.name === 'puzzle') && m.chess ? m : null;
+    const spoken = alts.map((alt) => ({ alt, n: normalizeSpoken(alt) }));
+
+    // 1. A move that can be played right now (checked first, so "h 3" is the
+    //    pawn move and not the "h" help alias).
+    if (board) {
+      for (const { alt, n } of spoken) {
+        const r = parseMove(board.chess, n.compact, { notation: 'en' });
+        if (r.ok) {
+          this.term.echo(`${alt}  →  ${local(r.move.san)}`, '🎙');
+          board.input(moveToUci(r.move));
+          this.refresh();
+          return;
+        }
+      }
+    }
+
+    // 2. A spoken command ("tabuleiro", "repetir", "continuar"...).
+    for (const { alt } of spoken) {
       const raw = stripAccents(alt.toLowerCase()).replace(/[.,!?]/g, '').trim();
       const first = raw.split(/\s+/)[0];
-      const cmd = this.commandMap.get(first);
+      const cmd = first.length > 1 ? this.commandMap.get(first) : null;
       if (cmd && VOICE_COMMANDS.has(cmd.name)) {
         this.term.echo(alt, '🎙');
         this.execute(raw);
         return;
       }
-      const n = normalizeSpoken(alt);
-      const m = this.mode;
-      if (m && (m.name === 'game' || m.name === 'puzzle') && m.chess) {
-        const r = parseMove(m.chess, n.compact, { notation: 'en' });
-        if (r.ok) {
-          this.term.echo(`${alt}  →  ${sanToLocal(r.move.san, notation)}`, '🎙');
-          m.input(moveToUci(r.move));
-          this.refresh();
-          return;
-        }
-      } else if (m && m.name === 'drill' && n.spaced) {
-        this.term.echo(alt, '🎙');
-        this.execute(n.spaced);
-        return;
-      }
     }
-    this.term.print(t('voice.notUnderstood', { text: alts[0] }), 'warn');
+
+    // 3. A drill answer ("clara", "sim", "c3 e4 g5"...).
+    if (m && m.name === 'drill' && spoken[0].n.spaced) {
+      this.term.echo(spoken[0].alt, '🎙');
+      this.execute(spoken[0].n.spaced);
+      return;
+    }
+
+    // 4. A move that can't be played here: explain it like a typed move.
+    let playable = null;
+    let moveShaped = null;
+    for (const { alt, n } of spoken) {
+      if (board && !playable) {
+        const r = parseMove(board.chess, n.compact, { notation: 'en' });
+        if (r.error !== 'syntax') playable = { alt, compact: n.compact, r };
+      }
+      if (!moveShaped && MOVE_LIKE.test(n.compact)) moveShaped = { alt, compact: n.compact };
+    }
+    if (playable) {
+      this.term.echo(`${playable.alt}  →  ${local(playable.compact)}`, '🎙');
+      if (board.name === 'game' && !board.isPlayerTurn()) this.term.print(t(board.result ? 'game.isOver' : 'game.notYourTurn'), 'warn');
+      else if (board.name === 'game') board.reportIllegal(playable.r, local(playable.compact));
+      else if (playable.r.error === 'ambiguous') this.term.print(t('move.ambiguous', { list: playable.r.candidates.map(local).join(', ') }), 'err');
+      else this.term.print(t('move.illegal', { input: local(playable.compact) }), 'err');
+      this.refresh();
+      return;
+    }
+    if (moveShaped && !board) {
+      // Heard a move, but there is no game or puzzle to play it in.
+      this.term.echo(`${moveShaped.alt}  →  ${local(moveShaped.compact)}`, '🎙');
+      this.term.print(t('voice.noGame', { move: local(moveShaped.compact) }), 'warn');
+      if (load('game')) this.term.print([t('voice.resumeHint.pre'), { t: 'resume', cmd: 'resume', run: true }, t('voice.resumeHint.mid'), { t: 'play', cmd: 'play', run: true }], 'dim');
+      else this.term.print([t('voice.playHint'), ' ', { t: 'play', cmd: 'play', run: true }], 'dim');
+      this.speaker.say(t('voice.noGameSpeech'));
+      return;
+    }
+
+    // 5. Nothing usable: show what was heard and how it was read.
+    const heard = spoken[0].n.spaced;
+    const same = !heard || heard.toLowerCase() === String(alts[0]).toLowerCase().trim();
+    this.term.print(t('voice.notUnderstood', { text: alts[0] }) + (same ? '' : ' ' + t('voice.heardAs', { text: heard })), 'warn');
+    this.term.print(t('voice.tryLike'), 'dim');
   }
 
   onListenState(on) {

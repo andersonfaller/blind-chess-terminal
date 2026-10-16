@@ -1,7 +1,7 @@
 // Service worker: makes the app (and the 7 MB engine) available offline.
 // App files: network first, so updates show up immediately; cache when offline.
 // Vendored libraries: cache first, they never change for a given version.
-const VERSION = 'v2.0.2';
+const VERSION = 'v2.0.3';
 const CACHE = `blind-chess-${VERSION}`;
 const CORE = [
   './',
